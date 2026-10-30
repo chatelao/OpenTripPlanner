@@ -1,0 +1,500 @@
+openapi: 3.1.0
+info:
+  title: PHP OpenTripPlanner Graph Loader & Server API
+  description: |
+    OpenAPI 3.1 Specification for the PHP OpenTripPlanner Graph Loader & Server HTTP interface.
+    Serves pre-compiled Java OTP binary graph objects (`graph.obj`) over HTTP/HTTPS with range request support,
+    metadata inspection, and read-only transit/graph queries as defined in DESIGN.md.
+  version: 1.0.0
+  license:
+    name: LGPL-3.0-only
+    url: https://www.gnu.org/licenses/lgpl-3.0.html
+servers:
+  - url: http://localhost:8080
+    description: Local PHP Development Server (PHP-FPM / Workerman / Swoole)
+  - url: https://api.opentripplanner.org
+    description: Production Server
+paths:
+  /graph/download:
+    get:
+      summary: Download or stream raw binary graph.obj file
+      description: |
+        Streams the raw serialized Java binary graph object (`graph.obj`) over HTTP/HTTPS.
+        Supports HTTP Range Requests (Status 206 Partial Content) for chunked binary downloading.
+      operationId: downloadGraph
+      parameters:
+        - name: graphId
+          in: query
+          required: false
+          description: Unique identifier of the graph object. Defaults to the configured default graph.
+          schema:
+            type: string
+            default: default
+        - name: Range
+          in: header
+          required: false
+          description: Standard HTTP byte range header for chunked downloads (e.g., `bytes=0-1023` or `bytes=1024-`).
+          schema:
+            type: string
+            example: bytes=0-1023
+        - name: If-Range
+          in: header
+          required: false
+          description: HTTP conditional range request header (ETag or Last-Modified date).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Full binary graph.obj file stream.
+          headers:
+            Accept-Ranges:
+              description: Indicates that range requests are supported.
+              schema:
+                type: string
+                example: bytes
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            Content-Length:
+              description: Size of the graph binary file in bytes.
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              description: Entity tag for cache validation.
+              schema:
+                type: string
+            Last-Modified:
+              description: Last modification timestamp of the graph object file.
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial binary stream content (HTTP 206 Partial Content).
+          headers:
+            Accept-Ranges:
+              schema:
+                type: string
+                example: bytes
+            Content-Range:
+              description: Range of bytes returned and total file size (e.g., `bytes 0-1023/14589234`).
+              schema:
+                type: string
+                example: bytes 0-1023/14589234
+            Content-Type:
+              schema:
+                type: string
+                example: application/octet-stream
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            ETag:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid Range header or request parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Specified graph object file was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '416':
+          description: Requested byte range cannot be satisfied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error while reading or streaming the binary graph.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /graph/metadata:
+    get:
+      summary: Retrieve graph inspection metadata
+      description: |
+        Retrieves lightweight metadata for the serialized graph file without parsing the full object graph into memory.
+      operationId: getGraphMetadata
+      parameters:
+        - name: graphId
+          in: query
+          required: false
+          description: Unique identifier of the graph object.
+          schema:
+            type: string
+            default: default
+      responses:
+        '200':
+          description: Graph metadata successfully retrieved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetadataDTO'
+        '404':
+          description: Graph object not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /graph/vertices:
+    get:
+      summary: Query graph vertices
+      description: |
+        Queries read-only vertices from the loaded graph model. Supports filtering by vertex ID or spatial bounding box (`bbox`).
+      operationId: getVertices
+      parameters:
+        - name: graphId
+          in: query
+          required: false
+          schema:
+            type: string
+            default: default
+        - name: id
+          in: query
+          required: false
+          description: Filter by specific vertex ID.
+          schema:
+            type: string
+        - name: bbox
+          in: query
+          required: false
+          description: Filter vertices within bounding box formatted as `minLon,minLat,maxLon,maxLat`.
+          schema:
+            type: string
+            example: "10.0,59.0,11.0,60.0"
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of vertices to return in response.
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: List of graph vertices.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vertex'
+        '400':
+          description: Invalid query or spatial bounding box parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Graph or vertex not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /graph/edges:
+    get:
+      summary: Query graph edges
+      description: |
+        Queries read-only edges from the loaded graph model. Supports filtering by edge ID or vertex ID.
+      operationId: getEdges
+      parameters:
+        - name: graphId
+          in: query
+          required: false
+          schema:
+            type: string
+            default: default
+        - name: id
+          in: query
+          required: false
+          description: Filter by specific edge ID.
+          schema:
+            type: string
+        - name: vertexId
+          in: query
+          required: false
+          description: Filter edges connected to a given vertex ID.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of edges to return in response.
+          schema:
+            type: integer
+            default: 100
+      responses:
+        '200':
+          description: List of graph edges.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Edge'
+        '400':
+          description: Invalid parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Graph or edge not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /graph/query:
+    get:
+      summary: Execute transit lookups and read-only queries against the loaded graph model
+      description: |
+        Executes transit lookups and read-only graph domain queries against the loaded graph entity.
+      operationId: handleTransitQuery
+      parameters:
+        - name: graphId
+          in: query
+          required: false
+          schema:
+            type: string
+            default: default
+        - name: query
+          in: query
+          required: false
+          description: Query string or entity selector expression.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Graph domain entity or transit query result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphEntity'
+        '400':
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    MetadataDTO:
+      type: object
+      required:
+        - graphId
+        - buildTimestamp
+        - boundingEnvelope
+        - vertexCount
+        - edgeCount
+      properties:
+        graphId:
+          type: string
+          example: default
+        buildTimestamp:
+          type: string
+          format: date-time
+          example: "2026-10-30T12:00:00Z"
+        fileHash:
+          type: string
+          example: "a1b2c3d4e5f67890"
+        boundingEnvelope:
+          $ref: '#/components/schemas/Envelope'
+        vertexCount:
+          type: integer
+          example: 150000
+        edgeCount:
+          type: integer
+          example: 380000
+        isCached:
+          type: boolean
+          example: true
+
+    Envelope:
+      type: object
+      required:
+        - minX
+        - minY
+        - maxX
+        - maxY
+      properties:
+        minX:
+          type: number
+          format: double
+          description: Minimum longitude (x-axis)
+          example: 10.0
+        minY:
+          type: number
+          format: double
+          description: Minimum latitude (y-axis)
+          example: 59.0
+        maxX:
+          type: number
+          format: double
+          description: Maximum longitude (x-axis)
+          example: 11.0
+        maxY:
+          type: number
+          format: double
+          description: Maximum latitude (y-axis)
+          example: 60.0
+
+    Vertex:
+      type: object
+      required:
+        - id
+        - lat
+        - lon
+        - label
+      properties:
+        id:
+          type: string
+          example: "v_1001"
+        lat:
+          type: number
+          format: double
+          example: 59.9139
+        lon:
+          type: number
+          format: double
+          example: 10.7522
+        label:
+          type: string
+          example: "Oslo Central Station"
+        outgoingEdges:
+          type: array
+          items:
+            type: string
+          description: List of outgoing edge IDs from this vertex.
+          example: ["e_2001", "e_2002"]
+
+    Edge:
+      type: object
+      required:
+        - id
+        - from
+        - to
+        - distance
+      properties:
+        id:
+          type: string
+          example: "e_2001"
+        from:
+          type: string
+          description: Source vertex ID
+          example: "v_1001"
+        to:
+          type: string
+          description: Target vertex ID
+          example: "v_1002"
+        distance:
+          type: number
+          format: double
+          description: Distance in meters
+          example: 154.5
+        name:
+          type: string
+          example: "Karl Johans gate"
+
+    TransitIndex:
+      type: object
+      properties:
+        agencyCount:
+          type: integer
+          example: 5
+        routeCount:
+          type: integer
+          example: 120
+        stopCount:
+          type: integer
+          example: 4500
+        tripCount:
+          type: integer
+          example: 22000
+
+    GraphEntity:
+      type: object
+      required:
+        - graphId
+        - buildTimestamp
+        - boundingEnvelope
+      properties:
+        graphId:
+          type: string
+          example: default
+        buildTimestamp:
+          type: string
+          format: date-time
+          example: "2026-10-30T12:00:00Z"
+        boundingEnvelope:
+          $ref: '#/components/schemas/Envelope'
+        vertices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vertex'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/Edge'
+        transitIndex:
+          $ref: '#/components/schemas/TransitIndex'
+
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          example: 404
+        message:
+          type: string
+          example: "Graph object not found"
+        details:
+          type: string
+          example: "File /var/otp/graphs/graph.obj does not exist."
