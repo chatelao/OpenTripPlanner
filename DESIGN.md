@@ -197,6 +197,9 @@ interface IGraphCacheManager
 The `IGraphHttpServer` component implements standard PSR-7 request handling and PSR-15 middleware
 interfaces to expose binary file streaming and read-only graph endpoints.
 
+An OpenAPI 3.1 specification document defining the web interface and JSON domain schemas is
+available in [`openapi.yaml`](openapi.yaml).
+
 #### Interface Specification
 
 ```php
