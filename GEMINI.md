@@ -1,104 +1,246 @@
-# Goal
+# GEMINI.md
 
-Portiere ausschliesslich die Java "--load"-Funktionalität auf PHP, um das extern vorcompilierte
-"graph.obj" via HTTP/HTTPS bereitzustellen.
+This file provides guidance to Gemini when working with code in this repository.
 
-# Structure
+## Project Overview
 
-- `CONCEPT.md`: The overall structure of the product, including Business & Use Cases as well as the
-  High-Level Architecture.
-- `DESIGN.md`: The detailed design of the solution, including the architecture, used tech stack for
-  development, production and testing, etc.
-- `TOP_ARCHITECTURE.puml`: The top-level component overview showing all major modules and the
-  dataflows between them.
-- `ROADMAP.md`: The list of accomplished and planned steps of the project.
-- `TECHNICAL_DEBTS.md`: If you find technical debts, like outdate components, security flaws, old
-  patterns, etc. log them here, but don’t fix them until asked to do so.
-- `README.md`: Add a link to the GitHub pages if any are produced / present.
-- `/specification/`: External Know-How as datasheet, standards, etc. Should be converted to Markdown
-  if PDF, etc.
-- `/src/`: The source code of the project
-- `/test/`: All tools, configurations & test cases
-- `/build/`: Only temporary place for compilation, may be cached by Github
+OTP2 (OpenTripPlanner), active development branch `dev-2.x`.
 
-# `CONCEPT.md` handling
+**Tech Stack:** Java 25, Maven, GraphQL API, GTFS/NeTEx transit data, OpenStreetMap
 
-- The `CONCEPT.md` add the business and use cases to the top Goal this file.
-- It contains an architecture with top-level functional components and their business interfaces.
-- It does not contain all precise implementation choices.
-- Every major choice is first drawn out as three alternatives, the best one is chosen and the ohter,
-  discarded ones kept in summary in the last chapter of the concept.
+## Essential Build Commands
 
-# `DESIGN.md`:
+```bash
+# Build and run tests (also produces the shaded JAR: otp-shaded/target/otp-shaded-VERSION.jar)
+mvn package
 
-- The `DESIGN.md` derives all necessary technological choices from `CONCEPT.md`.
-- It does contain precise implementation choices.
-- Every major choice is first drawn out as three alternatives, the best one is chosen and the ohter,
-  discarded ones kept in summary in the last chapter of the concept.
-- It contains a detailed architecture of all components and their technical interfaces.
-- Included the TOP_ARCHITECTURE.puml` as dynamic-rendering image as soon as available.
+# Build without running tests
+mvn package -DskipTests
 
-## REST-API
+# Run tests
+mvn test
 
-- If the API is used, always regenerate the client SDKs and the server stubs from the original
-  interface definitions
-- If there are OpenAPI definitions, render them with redocly to the GH page directory /apis.
-- If there are othe API definitions, render them with suitable tools to the GH page directory /apis
-  too.
-- Verify and add descriptions to the API definitions until they are useable for any product manager
-  / developer using them later.
-- If there are REST-APIs, describe them in `api/openapi.yaml`
-- If there are SOAP-APIs, describe them in `api/api.wsdl`
-- Keep the api definitions up-to-date with every system change
+# Run tests with code coverage
+mvn jacoco:prepare-agent test
 
-## Command-Line Interface (CLI)
+# Skip prettier during local builds
+mvn test -Dps          # equivalently: mvn test -PprettierSkip
 
-- Every option should be available as short and long form
+# Regenerate API/itinerary snapshot tests
+mvn clean -Pclean-test-snapshots
+```
 
-## Database
+## Code Formatting & Quality
 
-- If SQL statements are required, use the oldest, most common standard dialect available to improve
-  cross-plattform compatibility.
-- Draw database schematics as plantUML entities with crowfoot notation.
+Quality gates run in the Maven `validate` / `process-sources` phases and fail the build on
+violations:
 
-## GUI / UI
+- **Prettier**, run through the **Spotless** Maven plugin, auto-formats Java (100-char width,
+  2-space indent; the options are configured in the root `pom.xml`). Spotless also removes unused
+  imports (Javadoc-only references are kept). Requires `node`/`npm` on the `PATH`. CI enforces it;
+  check with `mvn spotless:check`, format with `mvn spotless:apply`. Skip locally with `-Dps`.
+- **Javadoc** formatting is opt-in: run Maven with `-DjavadocFormattingSkip=false` to format Javadoc
+  with the Eclipse JDT formatter (plus some regex fixes), run as a Spotless step before Prettier.
+  The settings live in `eclipse-formatter.properties`.
+- **Checkstyle** runs against `checkstyle.xml` in the `process-sources` phase (after Spotless). Skip
+  with `-Dcs` (or `-PcheckstyleSkip`).
 
-- Create screenshots of each UI step tested and store it as asset of the Action Workflow for review
+OpenRewrite (recipes in `openrewrite.yml`, e.g. removing unused imports) does **not** run
+automatically — invoke it explicitly with `mvn validate -Prewrite` (or the `-Drw` shortcut).
 
-# `ROADMAP.md` handling
+## Running OTP
 
-- The `ROADMAP.md` is the final plan to implement the `CONCEPT.md` and `DESIGN.md` to achive the top
-  goal
-- Define the steps in a way to allow for parallelization by defining interfaces only first and
-  implementing functions later.
-- The `ROADMAP.md` file is structured into several key sections:
-  - **Progress Overview**: A table summarizing Phases, Descriptions, and Status (using ✅ for
-    completed, 🚧 for in-progress, ⏳ for planned).
-  - **Goals**: A high-level list of project objectives with status emojis.
-  - **Phases**: Detailed chapters for each project phase.
-- The Tasks, and Subtasks if necessary, have checkboxes to show the progress.
-- Every task to be implemented has to be modest, feasible and reasonable.
-  - If no such task is available, then break down a bigger steps to modest ones without implementing
-    anything, just changing the `ROADMAP.md`.
-- Status Emojis:
-  - ✅: Completed
-  - 🚧: In Progress
-  - ⏳: Planned / To Do
-- The progress is updated with every increment.
-- The finished tasks are linked to the corresponding issue and timestamped at the end of the line.
+Main class: `org.opentripplanner.standalone.OTPMain`
 
-# HOWTO
+```bash
+# From the shaded JAR (use -Xmx2G when running from the IDE as well)
+java -Xmx2G -jar otp-shaded/target/otp-shaded-VERSION.jar [args]
+```
 
-- Keep `src/install.sh` to install all tools to build the application (test only tools, see below)
-- Used “ReadTheDocs.org” (RTD) for documentation publishing from main branch
+## Testing
 
-# Testing Locally & with Github Action Workflow (GH Action WF)
+- Unit tests: JUnit 5, organized by package structure
+- Assertions: prefer the Google Truth library, especially for collections and optionals — it reads
+  far better than the JUnit equivalents
+- Snapshot tests: API and itinerary tests use `.snap` files stored in git (regenerate with
+  `-Pclean-test-snapshots`)
+- Speed tests: `test/performance/` (see Performance Testing)
+- Test data: use the smallest possible OSM extracts (see `doc/user/Preparing-OSM.md`)
 
-- Setup the empty CI/CD pipeline before coding anything
-- Write CI/CD test independent as `test` script of the Github action workflows
-- Create screenshots of each UI step tested and store it as asset of the Action Workflow for review
-- Use `test/install.sh` to install test tools.
-- Use the Github action workflows to run the tests after commits.
-- Before committing fetch all changes from the remote repository and merge the changes
-- Run the CI/CD on every commit on every branch
-- Add as much caching as possible to the Github action workflows
+```bash
+# Single test class / single method
+mvn test -Dtest=ClassName
+mvn test -Dtest=ClassName#methodName
+```
+
+## Architecture Overview
+
+### Module Structure
+
+Multi-module Maven project (root `pom.xml` `<modules>`):
+
+- **utils**: low-level utilities shared by all modules
+- **model-core**: core domain primitives (`org.opentripplanner.core`) — `FeedScopedId`, `Cost`,
+  `Distance`, `I18NString`, `Accessibility`, plus framework (deduplicator, DI, resources)
+- **raptor**: transit routing engine — `raptor/router/src`. Isolated: **zero dependencies on OTP
+  code** (only utilities). Performance-critical; data is supplied via the SPI in `raptor/spi`.
+- **astar**: generic A\* shortest-path engine — `astar/src/main/java/org/opentripplanner/astar/`
+  (`AStar`, `AStarBuilder`, `spi/`, `strategy/`, `model/`)
+- **street**: street graph model, linking and search —
+  `street/src/main/java/org/opentripplanner/street/` (`model/edge/StreetEdge`,
+  `model/vertex/Vertex`, `linking/VertexLinker`, `search/`, `geometry/`) plus the
+  `service/vehicleparking` and `service/vehiclerental` domain services
+- **gtfs-realtime-protobuf**: GTFS-RT protocol buffer definitions
+- **application**: main OTP application — `application/src/main/java/org/opentripplanner/`. Key
+  packages: `routing`, `transit`, `gtfs`, `netex`, `osm`, `graph_builder`, `apis`, `updater`,
+  `service`, `standalone`, `streetadapter`
+- **otp-shaded**: produces the unified shaded JAR with all dependencies
+- **test/integration**: integration tests
+
+### Key Components
+
+**Transit Routing (Raptor)** — `raptor/router/src`
+
+- Range Raptor with multi-criteria pareto-optimal search; isolated from OTP (data supplied via SPI
+  in `raptor/spi`). Test all changes with SpeedTest (see Performance Testing).
+- `RoutingService` (`application/.../routing/api/RoutingService.java`) is the top-level routing
+  entry point. The OTP↔Raptor mapping (`RaptorRequest`/`RaptorPath`) lives in
+  `application/.../routing/algorithm/raptoradapter/` (e.g. `RaptorRequestMapper`,
+  `RaptorRoutingRequestTransitData`, `TransitRouter`).
+
+**Graph Building**
+
+- GTFS import: `application/src/main/java/org/opentripplanner/gtfs/`
+- NeTEx import: `application/src/main/java/org/opentripplanner/netex/`
+- OSM processing: `application/src/main/java/org/opentripplanner/osm/`
+- Graph builder: `application/src/main/java/org/opentripplanner/graph_builder/`
+
+**Routing Components**
+
+- Routing algorithm: `application/src/main/java/org/opentripplanner/routing/algorithm/`
+- Transfer optimization: `.../routing/algorithm/transferoptimization/`
+- Itinerary filter chain: `.../routing/algorithm/filterchain/`
+- Street routing (A\*): `astar/src/main/java/org/opentripplanner/astar/` (generic engine) +
+  `street/src/main/java/org/opentripplanner/street/search/` (street-search layer:
+  `StreetSearchBuilder`, heuristics, state)
+
+**APIs**
+
+- GraphQL APIs: `application/src/main/java/org/opentripplanner/apis/` (GraphiQL at
+  `http://localhost:8080/graphiql` when running)
+- Real-time updaters: `application/src/main/java/org/opentripplanner/updater/`
+
+**Configuration**
+
+- `application/src/main/java/org/opentripplanner/standalone/config/` parses JSON config into POJOs
+- Config files: `build-config.json`, `router-config.json`, `otp-config.json`
+
+### Design Model
+
+OTP follows a layered model (documented in `ARCHITECTURE.md`) that determines where new code
+belongs:
+
+- **Use Case Service**: stateless service that orchestrates several domain services; usually has no
+  model of its own.
+- **Domain Model**: encapsulates a business area (e.g. transit, vehicle position). A complex domain
+  splits into a **Service** (read access, backs the HTTP/GraphQL endpoints) and a **Repository**
+  (holds the model; written to by updaters). The split is applied consistently across the codebase
+  (~25 `*Service` / ~18 `*Repository` interfaces).
+
+Each documented component has a `package.md` file in its source directory.
+
+## Development Guidelines
+
+Highlights below; full guidelines in `DEVELOPMENT_DECISION_RECORDS.md`.
+
+**Code Quality**
+
+- Scout Rule: leave code better than you found it
+- Follow naming conventions from GTFS, NeTEx, or existing OTP code
+- Write JavaDoc for public types, methods and fields; document business intention, not just logic
+- Use comments sparingly — only for complex code
+
+**Architecture**
+
+- Dependency injection via Dagger (with manual DI where simpler)
+- Module wiring goes in `<module-name>/configure/<Module>Module.java`
+- Keep modules isolated with `api`, `spi`, and mapping layers; avoid circular dependencies
+
+**Types**
+
+- Prefer immutable types and builders; use records only where proper encapsulation holds
+
+**Testing**
+
+- Unit-test business logic at the lowest practical level; keep integration/system tests to a
+  minimum; full branch coverage preferred for non-trivial code
+
+## Git Workflow
+
+**Protected branches — NEVER push directly:** `dev-2.x`, `main`, `master`, `main_config`. Always
+work on a feature branch, and **ask which remote to use before pushing**.
+
+- Main development branch: `dev-2.x`; release branch: `master` (fast-forward merges from `dev-2.x`).
+- Reference the issue in the PR with a GitHub keyword, e.g. `related to #123` or `closes #123`.
+
+**Creating a cross-fork PR:**
+
+```bash
+git push -u entur my-feature
+gh pr create --repo opentripplanner/OpenTripPlanner --head entur:my-feature --base dev-2.x
+```
+
+## Documentation
+
+- User docs: `doc/user/` (Markdown, MkDocs); developer guide: `doc/user/Developers-Guide.md`
+- Architecture: `ARCHITECTURE.md` and per-component `package.md` files
+- Decision records: `DEVELOPMENT_DECISION_RECORDS.md`
+- Generated docs: https://docs.opentripplanner.org/
+
+```bash
+# Build docs locally
+pip install -r doc/user/requirements.txt
+mkdocs serve
+```
+
+## Performance Testing
+
+Performance is critical. **All changes to Raptor must be tested with SpeedTest** (requires a
+pre-built graph in `test/performance/<location>` — see `test/performance/README.md` for setup):
+
+```bash
+mvn --projects application exec:java -Dexec.mainClass="org.opentripplanner.transit.speed_test.SpeedTest" \
+  -Dexec.classpathScope=test -Dexec.args="--dir=test/performance/norway -p md -n 4 -i 3 -0"
+```
+
+SpeedTest also runs automatically after each merged PR; results are tracked at
+https://otp-performance.leonard.io/.
+
+## Project Structure Notes
+
+- Serialization version ID is the `pom.xml` property `otp.serialization.version.id` — **bump it when
+  changing the graph format**, or previously-built graphs fail to load.
+- Client code: `client/src/` (MapLibre-based JS test client)
+
+## Key Dependencies
+
+- **DI:** Google Dagger
+- **GraphQL:** GraphQL-Java (engine for the TransModel and GTFS APIs)
+- **REST:** Jersey, served via an embedded **Grizzly2** HTTP server (not Tomcat/Jetty)
+- **JSON:** Jackson
+- **Geometry:** JTS Topology Suite, GeoTools
+- **Search:** Lucene · **Metrics:** Micrometer · **GTFS-RT:** Protocol Buffers
+- **Testing:** JUnit 5, Mockito, Google Truth
+
+## Sandbox Features
+
+Optional features not yet in core OTP are Sandbox extensions:
+
+- Live in their own Maven source root: `application/src/ext/java/org/opentripplanner/ext/<feature>/`
+  (tests in `application/src/ext-test/java/`, resources in `application/src/ext/resources/`),
+  registered as extra source roots in `application/pom.xml`.
+- Gated by a feature flag in `org.opentripplanner.framework.application.OTPFeature`
+  (`sandbox = true`, `enabledByDefault = false`), toggled via the `otpFeatures` section of
+  `otp-config.json`.
+- Have conditional code blocks in core OTP.
+- See: http://docs.opentripplanner.org/en/latest/SandboxExtension/
